@@ -66,6 +66,11 @@ export const get = (store, key) => read([store], (t) => t.get(store, key));
 export const getAll = (store, query, count) => read([store], (t) => t.getAll(store, query, count));
 export const getAllByIndex = (store, index, query, count) => read([store], (t) => t.getAllByIndex(store, index, query, count));
 export const count = (store) => openDB().then((db) => promisify(db.transaction(store).objectStore(store).count()));
+export const put = (store, val) => write([store], (t) => t.put(store, val));
+export const add = (store, val) => write([store], (t) => t.add(store, val));
+export const del = (store, key) => write([store], (t) => t.delete(store, key));
+export { del as delete };
+export const clear = (store) => write([store], (t) => t.clear(store));
 
 // Iterate a whole index range without materialising unneeded values.
 export async function each(store, index, range, cb) {

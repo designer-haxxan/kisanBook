@@ -1,55 +1,86 @@
-// IndexedDB schema definition and migrations.
-import { normalizeBatches } from './batches.js';
+// IndexedDB schema for KisanBook — Pakistan farm management.
 
-export const DB_NAME = 'saleapp_pos';
-export const DB_VERSION = 2;
+export const DB_NAME   = 'kisanbook';
+export const DB_VERSION = 3;
 
-// Stores that make up the business data (included in backups).
 export const DATA_STORES = [
-  'categories', 'products', 'customers', 'suppliers', 'accounts',
-  'sales', 'saleItems', 'purchases', 'purchaseItems', 'saleReturns', 'purchaseReturns',
-  'vouchers', 'entries', 'stockMoves', 'adjustments', 'holds', 'auditLog', 'meta', 'batches', 'waLog',
+  'farms', 'plots', 'crops', 'seasons',
+  'expenses', 'laborEntries', 'harvests', 'sales', 'buyers',
+  'meta', 'auditLog',
 ];
 
 const STORES = {
-  meta: { keyPath: 'key', indexes: {} },
-  categories: { indexes: { nameLc: 'nameLc' } },
-  products: { indexes: { nameLc: 'nameLc', barcode: 'barcode', sku: 'sku', categoryId: 'categoryId' } },
-  customers: { indexes: { nameLc: 'nameLc', phone: 'phone' } },
-  suppliers: { indexes: { nameLc: 'nameLc', phone: 'phone' } },
-  accounts: { indexes: { type: 'type' } },
-  sales: { indexes: { number: ['number', true], date: 'date', customerId: 'customerId' } },
-  saleItems: { indexes: { saleId: 'saleId', productId: 'productId', date: 'date' } },
-  purchases: { indexes: { number: ['number', true], date: 'date', supplierId: 'supplierId' } },
-  purchaseItems: { indexes: { purchaseId: 'purchaseId', productId: 'productId', date: 'date' } },
-  saleReturns: { indexes: { number: ['number', true], date: 'date', saleId: 'saleId', customerId: 'customerId' } },
-  purchaseReturns: { indexes: { number: ['number', true], date: 'date', purchaseId: 'purchaseId', supplierId: 'supplierId' } },
-  vouchers: { indexes: { number: ['number', true], date: 'date', type: 'type' } },
-  entries: { indexes: { accountId: 'accountId', txnId: 'txnId', date: 'date', acctDate: [['accountId', 'date'], false] } },
-  stockMoves: { indexes: { productId: 'productId', refId: 'refId', date: 'date', prodDate: [['productId', 'date'], false] } },
-  adjustments: { indexes: { number: ['number', true], date: 'date' } },
-  holds: { indexes: { createdAt: 'createdAt' } },
-  auditLog: { indexes: { at: 'at' } },
+  meta:         { keyPath: 'key', indexes: {} },
+  farms:        { indexes: { nameLc: 'nameLc', active: 'active' } },
+  plots:        { indexes: { farmId: 'farmId', nameLc: 'nameLc' } },
+  crops:        { indexes: { nameLc: 'nameLc', season: 'season', active: 'active' } },
+  seasons:      { indexes: { plotId: 'plotId', farmId: 'farmId', cropId: 'cropId', year: 'year', status: 'status' } },
+  expenses:     { indexes: { seasonId: 'seasonId', farmId: 'farmId', date: 'date', category: 'category' } },
+  laborEntries: { indexes: { seasonId: 'seasonId', farmId: 'farmId', date: 'date' } },
+  harvests:     { indexes: { seasonId: 'seasonId', farmId: 'farmId', date: 'date' } },
+  sales:        { indexes: { seasonId: 'seasonId', farmId: 'farmId', date: 'date', buyerId: 'buyerId', paymentStatus: 'paymentStatus' } },
+  buyers:       { indexes: { nameLc: 'nameLc', type: 'type', active: 'active' } },
+  auditLog:     { indexes: { at: 'at' } },
 };
 
-// Added in version 2: batches with expiry dates, and a log of WhatsApp messages.
-const STORES_V2 = {
-  batches: { indexes: { productId: 'productId', expiry: 'expiry', refId: 'refId' } },
-  waLog: { indexes: { at: 'at', partyId: 'partyId' } },
+// Default Pakistan crops pre-loaded on first install.
+export const DEFAULT_CROPS = [
+  { name: 'Wheat',         urdu: 'گندم',        season: 'rabi',   unit: 'maund',  category: 'cereal'     },
+  { name: 'Rice / Paddy',  urdu: 'چاول / دھان', season: 'kharif', unit: 'maund',  category: 'cereal'     },
+  { name: 'Maize / Corn',  urdu: 'مکئی',        season: 'kharif', unit: 'maund',  category: 'cereal'     },
+  { name: 'Sugarcane',     urdu: 'گنا',          season: 'kharif', unit: 'tonne',  category: 'cash_crop'  },
+  { name: 'Cotton',        urdu: 'کپاس',         season: 'kharif', unit: 'maund',  category: 'cash_crop'  },
+  { name: 'Mustard',       urdu: 'سرسوں',        season: 'rabi',   unit: 'maund',  category: 'oilseed'    },
+  { name: 'Potato',        urdu: 'آلو',           season: 'rabi',   unit: 'maund',  category: 'vegetable'  },
+  { name: 'Tomato',        urdu: 'ٹماٹر',        season: 'kharif', unit: 'maund',  category: 'vegetable'  },
+  { name: 'Onion',         urdu: 'پیاز',          season: 'rabi',   unit: 'maund',  category: 'vegetable'  },
+  { name: 'Sunflower',     urdu: 'سورج مکھی',    season: 'kharif', unit: 'maund',  category: 'oilseed'    },
+  { name: 'Chickpea',      urdu: 'چنا',           season: 'rabi',   unit: 'maund',  category: 'pulse'      },
+  { name: 'Mung Bean',     urdu: 'مونگ',          season: 'kharif', unit: 'maund',  category: 'pulse'      },
+];
+
+// Expense categories with Pakistani terms.
+export const EXPENSE_CATEGORIES = [
+  { id: 'seeds',        label: 'Seeds',          urdu: 'بیج',           icon: 'flower1'         },
+  { id: 'fertilizer',   label: 'Fertilizer',     urdu: 'کھاد',          icon: 'droplet-half'    },
+  { id: 'pesticide',    label: 'Pesticide',      urdu: 'دوائی',         icon: 'shield-check'    },
+  { id: 'fuel',         label: 'Fuel / Engine',  urdu: 'ایندھن',        icon: 'fuel-pump'       },
+  { id: 'irrigation',   label: 'Irrigation',     urdu: 'پانی',          icon: 'water'           },
+  { id: 'land_prep',    label: 'Land Prep',      urdu: 'زمین تیاری',    icon: 'tractor'         },
+  { id: 'harvest_cost', label: 'Harvest Cost',   urdu: 'کٹائی',         icon: 'scissors'        },
+  { id: 'transport',    label: 'Transport',      urdu: 'ٹرانسپورٹ',    icon: 'truck'           },
+  { id: 'rent',         label: 'Land Rent',      urdu: 'کرایہ',         icon: 'house'           },
+  { id: 'misc',         label: 'Miscellaneous',  urdu: 'متفرق',         icon: 'three-dots'      },
+];
+
+export const EXPENSE_SUBCATEGORIES = {
+  fertilizer:   ['Urea (یوریا)', 'DAP', 'Potash', 'SOP', 'Zink', 'FYM / Farmyard Manure', 'Other'],
+  pesticide:    ['Insecticide', 'Herbicide / Weedicide', 'Fungicide', 'Other'],
+  fuel:         ['Diesel', 'Petrol', 'Lubricant / Oil'],
+  irrigation:   ['Tubewell', 'Canal', 'Drip / Sprinkler'],
+  land_prep:    ['Plowing (ہل)', 'Laser Leveling', 'Bed Making', 'Rotavator', 'Other'],
+  harvest_cost: ['Cutting / Reaping', 'Threshing', 'Cleaning / Winnowing', 'Machine Hire', 'Other'],
 };
 
-export const DEFAULT_CATEGORIES = ['Fertilizer', 'Insecticide', 'Herbicide / Weedicide', 'Fungicide', 'Seed', 'Micronutrient', 'Plant growth regulator'];
+export const SEASONS = [
+  { id: 'kharif', label: 'Kharif (خریف)', months: 'May – November', icon: '☀️' },
+  { id: 'rabi',   label: 'Rabi (ربیع)',   months: 'November – April', icon: '🌾' },
+  { id: 'both',   label: 'Year-round',    months: 'All year',         icon: '📅' },
+];
 
-export const SYSTEM_ACCOUNTS = [
-  { id: 'cash', name: 'Cash in Hand', type: 'cash' },
-  { id: 'sales', name: 'Sales', type: 'income' },
-  { id: 'sales_returns', name: 'Sales Returns', type: 'income' },
-  { id: 'purchases', name: 'Purchases', type: 'expense' },
-  { id: 'purchase_returns', name: 'Purchase Returns', type: 'expense' },
-  { id: 'tax', name: 'Sales Tax Payable', type: 'liability' },
-  { id: 'equity', name: 'Opening Balance Equity', type: 'equity' },
-  { id: 'income', name: 'Other Income', type: 'income' },
-  { id: 'expense', name: 'General Expenses', type: 'expense' },
+export const SALE_METHODS = [
+  { id: 'arhtiya', label: 'Arhtiya (Commission Agent)', urdu: 'آڑھتیا', icon: 'person-badge'  },
+  { id: 'direct',  label: 'Direct Buyer at Farm',       urdu: 'فارم پر براہ راست', icon: 'house-door' },
+  { id: 'mandi',   label: 'Mandi Market',               urdu: 'منڈی',   icon: 'shop'          },
+  { id: 'contract',label: 'Contract / Advance Buyer',   urdu: 'کنٹریکٹ', icon: 'file-text'   },
+];
+
+export const BUYER_TYPES = [
+  { id: 'arhtiya', label: 'Arhtiya (آڑھتیا)' },
+  { id: 'trader',  label: 'Trader / Bepari (بیوپاری)' },
+  { id: 'mill',    label: 'Mill / Factory (مل)' },
+  { id: 'direct',  label: 'Direct Consumer' },
+  { id: 'govt',    label: 'Government / Passco' },
 ];
 
 function createStores(db, defs) {
@@ -62,30 +93,27 @@ function createStores(db, defs) {
   }
 }
 
-// `t` is the raw versionchange transaction, `wt` the same transaction wrapped by idb.wrap.
 export function upgrade(db, oldVersion, t, wt) {
-  if (oldVersion < 1) {
+  if (oldVersion < 3) {
+    // Drop all old POS stores if upgrading from v1/v2.
+    const existingStores = [...db.objectStoreNames];
+    for (const s of existingStores) {
+      try { db.deleteObjectStore(s); } catch { /* ignore */ }
+    }
     createStores(db, STORES);
     const now = new Date().toISOString();
-    const acc = t.objectStore('accounts');
-    for (const a of SYSTEM_ACCOUNTS) acc.put({ ...a, system: true, active: 1, createdAt: now, updatedAt: now });
-    t.objectStore('meta').put({ key: 'schemaVersion', value: 1 });
+    t.objectStore('meta').put({ key: 'schemaVersion', value: 3 });
     t.objectStore('meta').put({ key: 'createdAt', value: now });
-  }
-  if (oldVersion < 2) {
-    createStores(db, STORES_V2);
-    t.objectStore('stockMoves').createIndex('batchId', 'batchId', { unique: false });
-    t.objectStore('meta').put({ key: 'schemaVersion', value: 2 });
-    // Existing stock moves into each product's opening batch; seed crop-input categories on empty databases.
     (async () => {
-      await normalizeBatches(wt);
-      if (!(await wt.getAll('categories')).length) {
-        const now = new Date().toISOString();
-        for (const name of DEFAULT_CATEGORIES) {
-          await wt.put('categories', { id: crypto.randomUUID ? crypto.randomUUID() : `cat-${name}`, name, nameLc: name.toLowerCase(), createdAt: now, updatedAt: now });
-        }
+      const cropStore = t.objectStore('crops');
+      for (const c of DEFAULT_CROPS) {
+        cropStore.put({
+          id: crypto.randomUUID ? crypto.randomUUID() : `crop-${c.name}`,
+          name: c.name, nameLc: c.name.toLowerCase(),
+          urdu: c.urdu, season: c.season, unit: c.unit,
+          category: c.category, active: 1, createdAt: now, updatedAt: now,
+        });
       }
-    })().catch((e) => { console.error('Migration to v2 failed', e); t.abort(); });
+    })().catch((e) => { console.error('KisanBook DB init failed', e); t.abort(); });
   }
-  // Future migrations: if (oldVersion < 3) { ... }
 }

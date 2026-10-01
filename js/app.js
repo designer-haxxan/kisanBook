@@ -1,35 +1,29 @@
-// Application bootstrap: service worker, database, authentication gate, navigation and routing.
+// KisanBook bootstrap: service worker, database, auth gate, navigation and routing.
 import { CONFIG } from './config.js';
 import { applyTheme, getSettings } from './core/settings.js';
 import * as UI from './core/ui.js';
 import { esc } from './core/utils.js';
 import { openDB } from './db/idb.js';
 import * as Auth from './services/auth.js';
-import * as Catalog from './services/catalog.js';
+import * as Catalog from './services/farmCatalog.js';
 
 const $ = window.jQuery;
 
 // Route table: name → [loader, title, permission|null, icon, menu section]
 const ROUTES = {
-  dashboard: [() => import('./modules/dashboard.js'), 'Dashboard', null, 'house', 'Main'],
-  pos: [() => import('./modules/pos.js'), 'New Sale', 'sale.create', 'cart-plus', 'Main'],
-  sales: [() => import('./modules/documents.js'), 'Sales', null, 'receipt', 'Main'],
-  purchase: [() => import('./modules/pos.js'), 'New Purchase', 'purchase.manage', null, null],
-  purchases: [() => import('./modules/documents.js'), 'Purchases', 'purchase.manage', 'bag', 'Main'],
-  returns: [() => import('./modules/documents.js'), 'Returns', null, 'arrow-return-left', 'Main'],
-  products: [() => import('./modules/products.js'), 'Products', null, 'box-seam', 'Inventory'],
-  stock: [() => import('./modules/stock.js'), 'Stock', null, 'boxes', 'Inventory'],
-  expiry: [() => import('./modules/stock.js'), 'Expiry & batches', null, 'hourglass-split', 'Inventory'],
-  customers: [() => import('./modules/parties.js'), 'Customers', null, 'people', 'Parties'],
-  suppliers: [() => import('./modules/parties.js'), 'Suppliers', 'purchase.manage', 'truck', 'Parties'],
-  whatsapp: [() => import('./modules/whatsapp.js'), 'WhatsApp', null, 'whatsapp', 'Parties'],
-  vouchers: [() => import('./modules/vouchers.js'), 'Cash Book & Payments', 'voucher.create', 'cash-coin', 'Accounts'],
-  accounts: [() => import('./modules/accounts.js'), 'Accounts', 'account.manage', 'bank', 'Accounts'],
-  reports: [() => import('./reports/reports.js'), 'Reports', 'reports.view', 'bar-chart-line', 'Accounts'],
-  backup: [() => import('./modules/backup.js'), 'Backup & Restore', 'backup.export', 'cloud-arrow-down', 'Administration'],
-  settings: [() => import('./modules/settings.js'), 'Settings', null, 'gear', 'Administration'],
+  dashboard: [() => import('./modules/dashboard.js'),  'Dashboard',          null,             'house',          'Main'],
+  farms:     [() => import('./modules/farms.js'),       'Farms & Plots',      null,             'geo-alt',        'Main'],
+  seasons:   [() => import('./modules/seasons.js'),     'Crop Seasons',       null,             'flower1',        'Main'],
+  expenses:  [() => import('./modules/expenses.js'),    'Expenses',           null,             'receipt-cutoff', 'Records'],
+  labor:     [() => import('./modules/labor.js'),       'Labor (Mazdoor)',    null,             'people',         'Records'],
+  harvest:   [() => import('./modules/harvest.js'),     'Harvest',            null,             'basket2',        'Records'],
+  sales:     [() => import('./modules/sales.js'),       'Sales',              null,             'cash-coin',      'Records'],
+  buyers:    [() => import('./modules/buyers.js'),      'Buyers',             null,             'person-lines-fill', 'Records'],
+  reports:   [() => import('./reports/reports.js'),     'Reports',            'reports.view',   'bar-chart-line', 'Analysis'],
+  backup:    [() => import('./modules/backup.js'),      'Backup & Restore',   'backup.export',  'cloud-arrow-down','Settings'],
+  settings:  [() => import('./modules/settings.js'),   'Settings',           null,             'gear',           'Settings'],
 };
-const FOCUS_ROUTES = new Set(['pos', 'purchase']);
+const FOCUS_ROUTES = new Set([]);
 
 let currentModule = null;
 let routeToken = 0;
@@ -40,13 +34,12 @@ function showView(name) {
   $('#view-login').toggleClass('d-none', name !== 'login');
   $('#view-app').toggleClass('d-none', name !== 'app');
 }
-
 function fatal(msg) {
   $('#splash-error').text(msg);
   $('#splash .spinner-border').addClass('d-none');
 }
 
-// ---------- Service worker & install ----------
+// ---------- Service worker ----------
 function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   if (location.protocol === 'file:') return;
@@ -65,7 +58,6 @@ function registerSW() {
     });
     setInterval(() => navigator.onLine && reg.update().catch(() => {}), 60 * 60 * 1000);
   }).catch((e) => console.warn('Service worker registration failed:', e));
-  // Reload only when an update replaced an existing worker (not on the very first install).
   const hadController = !!navigator.serviceWorker.controller;
   let reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloading) { reloading = true; location.reload(); } });
@@ -87,9 +79,11 @@ function renderConn(status) {
   const map = { online: ['wifi', 'Online'], offline: ['wifi-off', 'Offline'] };
   const [icon, label] = map[status] || map.offline;
   $('#conn-badge').attr('class', `badge rounded-pill conn-${status}`).html(`<i class="bi bi-${icon}"></i> <span>${label}</span>`);
-  $('#login-conn').html(navigator.onLine ? '<i class="bi bi-wifi text-success"></i> Online' : '<i class="bi bi-wifi-off text-danger"></i> Offline — connect to the internet to sign in');
+  $('#login-conn').html(navigator.onLine
+    ? '<i class="bi bi-wifi text-success"></i> Online'
+    : '<i class="bi bi-wifi-off text-danger"></i> Offline — connect to the internet to sign in');
 }
-window.addEventListener('online', () => renderConn('online'));
+window.addEventListener('online',  () => renderConn('online'));
 window.addEventListener('offline', () => renderConn('offline'));
 
 // ---------- Navigation ----------
@@ -104,8 +98,8 @@ function buildMenu() {
   const u = Auth.user();
   $('#user-name').text(u.name);
   $('#user-role').text(Auth.ROLES[u.role] || u.role);
-  $('#brand-name').text(getSettings().business.name || CONFIG.APP_NAME);
-  $('#bottom-nav [data-route="pos"]').toggleClass('d-none', !Auth.can('sale.create'));
+  const bizName = getSettings().farm?.name || CONFIG.APP_NAME;
+  $('#brand-name').text(bizName);
 }
 
 async function route() {
@@ -150,7 +144,7 @@ async function startApp() {
 }
 
 async function doLogout(forced = false, reason = '') {
-  if (!forced && !await UI.confirmDialog('Log out of this device? Your POS data stays on this device, but signing in again requires an internet connection.', { okLabel: 'Log out', okClass: 'btn-danger' })) return;
+  if (!forced && !await UI.confirmDialog('Log out of this device? Your farm data stays on this device, but signing in again requires an internet connection.', { okLabel: 'Log out', okClass: 'btn-danger' })) return;
   clearInterval(expiryTimer);
   try { currentModule?.destroy?.(); } catch { /* ignore */ }
   currentModule = null;
@@ -159,7 +153,6 @@ async function doLogout(forced = false, reason = '') {
   showLogin(reason);
 }
 
-// Sessions are valid until expiresAt (set by the server); after that an online sign-in is required.
 let expiryTimer = null;
 function checkExpiry() {
   if (!Auth.sessionExpired()) return false;
@@ -171,9 +164,7 @@ function checkExpiry() {
 function showLogin(reason = '') {
   showView('login');
   renderConn(navigator.onLine ? 'online' : 'offline');
-  const notices = [];
-  if (reason) notices.push(esc(reason));
-  $('#login-notice').toggleClass('d-none', !notices.length).html(notices.join('<br>'));
+  $('#login-notice').toggleClass('d-none', !reason).text(reason);
   setTimeout(() => $('#login-username').trigger('focus'), 50);
 }
 
@@ -197,7 +188,7 @@ $('#toggle-pw').on('click', () => {
 $('#logout-btn').on('click', () => doLogout(false));
 $('#install-btn').on('click', promptInstall);
 window.addEventListener('hashchange', route);
-document.addEventListener('settings:changed', () => { applyTheme(); if (Auth.user()) $('#brand-name').text(getSettings().business.name || CONFIG.APP_NAME); });
+document.addEventListener('settings:changed', () => { applyTheme(); if (Auth.user()) { const n = getSettings().farm?.name || CONFIG.APP_NAME; $('#brand-name').text(n); } });
 document.addEventListener('auth:changed', () => { if (Auth.user()) buildMenu(); });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
 

@@ -3,22 +3,21 @@
 const KEY = 'pos.settings';
 
 export const DEFAULT_SETTINGS = {
-  business: { name: 'My Agri Store', address: '', phone: '', taxNo: '', licenseNo: '', footer: 'Thank you for your purchase!' },
+  farm: {
+    name: 'My Farm',
+    ownerName: '',
+    address: '',
+    phone: '',
+    district: '',
+    tehsil: '',
+  },
   currency: 'Rs',
-  taxEnabled: false,
-  taxRate: 0,
-  allowNegativeStock: false,
-  updatePurchasePrice: true,
-  // Batches & expiry
-  nearExpiryDays: 60,
-  allowExpiredSale: false,
-  creditDays: 0,
-  // WhatsApp messaging (click-to-chat; the user presses Send in WhatsApp)
-  whatsapp: { countryCode: '92', mode: 'auto', ownerPhone: '', offerAfterSale: true, statementRows: 30, templates: {} },
-  prefixes: { sale: 'SALE', purchase: 'PUR', saleReturn: 'SRN', purchaseReturn: 'PRN', receipt: 'RCV', payment: 'PAY', transfer: 'TRF', adjustment: 'ADJ' },
+  defaultWeightUnit: 'maund',
+  defaultAreaUnit: 'acres',
+  // WhatsApp
+  whatsapp: { countryCode: '92', ownerPhone: '' },
   printer: { method: 'browser', width: 58, autoPrint: false, copies: 1, chunkSize: 20, deviceName: '', deviceId: '' },
   theme: 'auto',
-  register: 'Main',
 };
 
 function merge(base, over) {

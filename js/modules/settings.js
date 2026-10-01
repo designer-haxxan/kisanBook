@@ -1,191 +1,237 @@
-// Settings: business profile, tax & numbering, printer, appearance, account, data tools.
+// KisanBook Settings — farm profile, units, crops, theme, account
 import { CONFIG } from '../config.js';
 import * as UI from '../core/ui.js';
-import { esc, num, fmtDateTime } from '../core/utils.js';
-import { getSettings, saveSettings } from '../core/settings.js';
+import { esc, uuid, nowISO, fmtDateTime } from '../core/utils.js';
+import { getSettings, saveSettings, pref } from '../core/settings.js';
 import * as Auth from '../services/auth.js';
-import * as Posting from '../services/posting.js';
-import * as Printer from '../printer/printer.js';
-import { TEMPLATES, normalizePhone, compose } from '../services/whatsapp.js';
+import * as idb from '../db/idb.js';
+import * as Catalog from '../services/farmCatalog.js';
+import { WEIGHT_UNITS, AREA_UNITS, weightUnitLabel, areaUnitLabel } from '../core/units.js';
 
 const $ = window.jQuery;
+let $el;
 
 function section(title, icon, body) {
   return `<div class="card mb-3"><div class="card-body"><h2 class="h6 mb-3"><i class="bi bi-${icon} me-2"></i>${title}</h2>${body}</div></div>`;
 }
 
+function unitOptions(units, selected) {
+  return units.map((u) => `<option value="${u.id}" ${u.id === selected ? 'selected' : ''}>${u.label}</option>`).join('');
+}
+
+// ── Crop Management ──────────────────────────────────────
+async function openCropModal(existing = null) {
+  const isEdit = !!existing;
+  const c = existing || {};
+  const html = `
+    <div class="mb-3">
+      <label class="form-label">Crop Name (English) <span class="text-danger">*</span></label>
+      <input id="cr-name" class="form-control" placeholder="e.g. Wheat" value="${esc(c.name || '')}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Name in Urdu / Local language</label>
+      <input id="cr-urdu" class="form-control" placeholder="گندم" value="${esc(c.urdu || '')}" dir="auto">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Season</label>
+      <select id="cr-season" class="form-select">
+        <option value="kharif" ${(c.season || '') === 'kharif' ? 'selected' : ''}>Kharif (Summer — خریف)</option>
+        <option value="rabi"   ${(c.season || '') === 'rabi'   ? 'selected' : ''}>Rabi (Winter — ربیع)</option>
+        <option value="both"   ${(c.season || 'both') === 'both' ? 'selected' : ''}>Both seasons</option>
+      </select>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Typical Yield (Maunds/Acre)</label>
+      <input id="cr-yield" type="number" min="0" step="1" class="form-control" placeholder="e.g. 35" value="${c.yieldPerAcre || ''}">
+    </div>`;
+
+  const ok = await UI.formDialog(isEdit ? 'Edit Crop' : 'Add Crop', html, { okLabel: isEdit ? 'Save' : 'Add Crop' });
+  if (!ok) return null;
+
+  const name = $('#cr-name').val().trim();
+  if (!name) { UI.toast('Crop name is required.', 'danger'); return null; }
+
+  const now = nowISO();
+  const rec = {
+    id:           isEdit ? c.id : uuid(),
+    name,
+    urdu:         $('#cr-urdu').val().trim(),
+    season:       $('#cr-season').val(),
+    yieldPerAcre: parseFloat($('#cr-yield').val()) || null,
+    active:       1,
+    createdAt:    isEdit ? c.createdAt : now,
+    updatedAt:    now,
+  };
+  await idb.put('crops', rec);
+  await Catalog.refreshCrop(rec.id);
+  document.dispatchEvent(new CustomEvent('data:changed'));
+  return rec;
+}
+
+// ── Main render ──────────────────────────────────────────
 export default {
   async render(el) {
-    const $el = $(el);
+    $el = $(el);
     const s = getSettings();
     const u = Auth.user();
     const manage = Auth.can('settings.manage');
-    const cap = Printer.capabilities();
     const ro = manage ? '' : 'disabled';
-    const P = s.prefixes;
-    $el.html(UI.pageHeader('Settings') + `<div class="row g-3"><div class="col-lg-6">
-      ${section('Business profile', 'shop', `<form class="f-business row g-2">
-        <div class="col-12"><label class="form-label">Business name</label><input name="name" class="form-control" value="${esc(s.business.name)}" ${ro}></div>
-        <div class="col-12"><label class="form-label">Address</label><input name="address" class="form-control" value="${esc(s.business.address)}" ${ro}></div>
-        <div class="col-6"><label class="form-label">Phone</label><input name="phone" class="form-control" value="${esc(s.business.phone)}" ${ro}></div>
-        <div class="col-6"><label class="form-label">Tax / NTN no.</label><input name="taxNo" class="form-control" value="${esc(s.business.taxNo)}" ${ro}></div>
-        <div class="col-12"><label class="form-label">Pesticide / fertilizer dealer license no.</label><input name="licenseNo" class="form-control" value="${esc(s.business.licenseNo || '')}" ${ro}></div>
-        <div class="col-8"><label class="form-label">Receipt footer</label><input name="footer" class="form-control" value="${esc(s.business.footer)}" ${ro}></div>
-        <div class="col-4"><label class="form-label">Currency</label><input name="currency" class="form-control" maxlength="5" value="${esc(s.currency)}" ${ro}></div>
-        ${manage ? '<div class="col-12"><button class="btn btn-primary">Save</button></div>' : ''}</form>`)}
-      ${section('Sales, stock & numbering', 'sliders', `<form class="f-sales row g-2">
-        <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="taxEnabled" id="s-tax" ${s.taxEnabled ? 'checked' : ''} ${ro}><label class="form-check-label" for="s-tax">Charge sales tax</label></div></div>
-        <div class="col-6"><label class="form-label">Tax rate (%)</label><input name="taxRate" class="form-control" inputmode="decimal" value="${s.taxRate}" ${ro}></div>
-        <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="allowNegativeStock" id="s-neg" ${s.allowNegativeStock ? 'checked' : ''} ${ro}><label class="form-check-label" for="s-neg">Allow selling when stock is insufficient</label></div></div>
-        <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="updatePurchasePrice" id="s-upp" ${s.updatePurchasePrice ? 'checked' : ''} ${ro}><label class="form-check-label" for="s-upp">Update product cost price from latest purchase</label></div></div>
-        <div class="col-12 small text-body-secondary mt-2">Document number prefixes (use a different prefix on each device if several devices sell at the same time)</div>
-        ${[['sale', 'Sale'], ['purchase', 'Purchase'], ['saleReturn', 'Sale return'], ['purchaseReturn', 'Purchase return'], ['receipt', 'Receipt'], ['payment', 'Payment'], ['transfer', 'Transfer'], ['adjustment', 'Adjustment']]
-          .map(([k, l]) => `<div class="col-6 col-md-3"><label class="form-label small">${l}</label><input name="p_${k}" class="form-control form-control-sm" maxlength="12" value="${esc(P[k])}" ${ro} pattern="[A-Za-z0-9]+"></div>`).join('')}
-        ${manage ? '<div class="col-12"><button class="btn btn-primary">Save</button></div>' : ''}</form>`)}
-      ${section('Batches, expiry & credit', 'hourglass-split', `<form class="f-expiry row g-2">
-        <div class="col-6"><label class="form-label">"Expiring soon" warning</label><div class="input-group"><input name="nearExpiryDays" type="number" min="0" max="730" class="form-control" value="${esc(s.nearExpiryDays)}" ${ro}><span class="input-group-text">days</span></div></div>
-        <div class="col-6"><label class="form-label">Default credit period</label><div class="input-group"><input name="creditDays" type="number" min="0" max="730" class="form-control" value="${esc(s.creditDays)}" ${ro}><span class="input-group-text">days</span></div><div class="form-text">0 = no automatic due date</div></div>
-        <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="allowExpiredSale" id="s-exps" ${s.allowExpiredSale ? 'checked' : ''} ${ro}><label class="form-check-label" for="s-exps">Allow selling expired batches (not recommended)</label></div></div>
-        <div class="col-12 small text-body-secondary">Sales always take stock from the batch with the earliest expiry first (FEFO). A specific batch can still be chosen on each cart line.</div>
-        ${manage ? '<div class="col-12"><button class="btn btn-primary">Save</button></div>' : ''}</form>`)}
-      ${section('Appearance', 'palette', `<select class="form-select f-theme"><option value="auto">Follow device</option><option value="light">Light</option><option value="dark">Dark</option></select>`)}
-    </div><div class="col-lg-6">
-      ${section('Receipt printer', 'printer', `
-        <div class="alert ${cap.webBluetooth ? 'alert-info' : 'alert-secondary'} small py-2">${esc(cap.note)}</div>
-        <form class="f-printer row g-2">
-          <div class="col-12"><label class="form-label">Print method</label><select name="method" class="form-select">
-            <option value="browser" ${s.printer.method === 'browser' ? 'selected' : ''}>Browser print dialog (any printer, PDF, AirPrint)</option>
-            <option value="bluetooth" ${s.printer.method === 'bluetooth' ? 'selected' : ''} ${cap.webBluetooth ? '' : 'disabled'}>Bluetooth ESC/POS printer (Web Bluetooth, BLE)${cap.webBluetooth ? '' : ' — not supported here'}</option>
-            <option value="rawbt" ${s.printer.method === 'rawbt' ? 'selected' : ''}>RawBT app (Android, Classic Bluetooth printers)</option></select></div>
-          <div class="col-6"><label class="form-label">Paper width</label><select name="width" class="form-select"><option value="58" ${s.printer.width == 58 ? 'selected' : ''}>58 mm (32 chars)</option><option value="80" ${s.printer.width == 80 ? 'selected' : ''}>80 mm (48 chars)</option></select></div>
-          <div class="col-6"><label class="form-label">Copies</label><input name="copies" type="number" min="1" max="5" class="form-control" value="${s.printer.copies || 1}"></div>
-          <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="autoPrint" id="s-ap" ${s.printer.autoPrint ? 'checked' : ''}><label class="form-check-label" for="s-ap">Print receipt automatically after each sale</label></div></div>
-        </form>
-        <div class="bt-box mt-3 ${s.printer.method === 'bluetooth' ? '' : 'd-none'}">
-          <div class="d-flex align-items-center gap-2 mb-2"><i class="bi bi-bluetooth"></i><span class="bt-status small flex-grow-1"></span></div>
-          <div class="d-flex gap-2"><button class="btn btn-outline-primary btn-bt-connect">Connect printer</button><button class="btn btn-outline-secondary btn-bt-disconnect">Disconnect</button></div>
-          <label class="form-label mt-3">Transfer speed</label>
-          <select class="form-select f-chunk">${Object.entries(Printer.CHUNK_SIZES).map(([v, l]) => `<option value="${v}" ${Number(s.printer.chunkSize || 20) === Number(v) ? 'selected' : ''}>${l}</option>`).join('')}</select>
-          <div class="form-text">If receipts come out cut off or garbled, choose Safe.</div>
-        </div>
-        <div class="rawbt-box small text-body-secondary mt-2 ${s.printer.method === 'rawbt' ? '' : 'd-none'}">Install the free <b>RawBT</b> app from Google Play, pair your printer in RawBT, then print from here. Receipts are sent as ESC/POS data.</div>
-        <button class="btn btn-outline-secondary mt-3 btn-test"><i class="bi bi-printer me-1"></i>Test print</button>`)}
-      ${section('WhatsApp', 'whatsapp', `<form class="f-wa row g-2">
-        <div class="col-4"><label class="form-label">Country code</label><div class="input-group"><span class="input-group-text">+</span><input name="countryCode" class="form-control" inputmode="numeric" maxlength="4" value="${esc(s.whatsapp.countryCode)}"></div></div>
-        <div class="col-8"><label class="form-label">Open messages in</label><select name="mode" class="form-select">
-          ${[['auto', 'Automatic (app on phones, WhatsApp Web on computers)'], ['web', 'WhatsApp Web (web.whatsapp.com)'], ['wame', 'wa.me link (lets you choose app or web)'], ['app', 'WhatsApp desktop / phone app']].map(([v, l]) => `<option value="${v}" ${s.whatsapp.mode === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-        <div class="col-6"><label class="form-label">Owner / manager WhatsApp</label><input name="ownerPhone" type="tel" class="form-control" value="${esc(s.whatsapp.ownerPhone)}" placeholder="03xx xxxxxxx"></div>
-        <div class="col-6"><label class="form-label">Statement rows</label><input name="statementRows" type="number" min="5" max="100" class="form-control" value="${esc(s.whatsapp.statementRows)}"></div>
-        <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="offerAfterSale" id="s-waas" ${s.whatsapp.offerAfterSale ? 'checked' : ''}><label class="form-check-label" for="s-waas">Highlight "Send on WhatsApp" after each sale to a customer with a number</label></div></div>
-        <div class="col-12"><button class="btn btn-primary">Save</button> <button type="button" class="btn btn-outline-success btn-wa-test"><i class="bi bi-whatsapp me-1"></i>Test</button></div></form>
-        <hr><div class="small fw-semibold mb-1">Message templates</div>
-        <div class="small text-body-secondary mb-2">Placeholders like <code>{name}</code> are filled in automatically. A line whose placeholders are all empty is left out. You can write templates in Urdu.</div>
-        <select class="form-select mb-2 tpl-key">${Object.entries(TEMPLATES).map(([k, t]) => `<option value="${k}">${esc(t.label)}</option>`).join('')}</select>
-        <textarea class="form-control font-monospace small tpl-text" rows="12"></textarea>
-        <div class="small text-body-secondary mt-1 tpl-vars"></div>
-        <div class="d-flex gap-2 mt-2"><button class="btn btn-primary btn-sm btn-tpl-save">Save template</button><button class="btn btn-outline-secondary btn-sm btn-tpl-reset">Reset to default</button></div>`)}
-      ${section('My account', 'person-circle', `<div class="mb-2"><b>${esc(u.username)}</b><div class="small text-body-secondary">${esc(Auth.ROLES[u.role] || u.role)}</div></div>
-        <div class="small">Session valid until <b>${esc(fmtDateTime(new Date(Auth.expiresAt()).toISOString()))}</b>. After that, sign in again while online.</div>
-        <div class="small mt-1">Device ID: <code class="user-select-all">${esc(Auth.deviceId())}</code></div>
-        <div class="form-text">This account is linked to this device. To move it to another phone or change the password, call ${esc(CONFIG.SUPPORT_PHONE)}.</div>`)}
-      ${section('App & data', 'phone', `<div class="small mb-2">Version ${esc(CONFIG.APP_VERSION)} · <span class="storage-info">checking storage…</span></div>
-        <div class="d-flex flex-wrap gap-2">
-          <button class="btn btn-outline-secondary btn-install d-none"><i class="bi bi-download me-1"></i>Install app</button>
-          ${manage ? '<button class="btn btn-outline-secondary btn-integrity"><i class="bi bi-shield-check me-1"></i>Check data integrity</button><button class="btn btn-outline-secondary btn-rebuild"><i class="bi bi-arrow-repeat me-1"></i>Recalculate stock</button>' : ''}
-        </div>
-        <div class="small text-body-secondary mt-2 ios-hint d-none">On iPhone/iPad: tap <i class="bi bi-box-arrow-up"></i> Share → <b>Add to Home Screen</b> to install.</div>`)}
-    </div></div>`);
 
-    $el.find('.f-theme').val(s.theme).on('change', function () { saveSettings({ theme: this.value }); });
-    $el.on('submit', '.f-business', (e) => {
-      e.preventDefault();
-      const v = Object.fromEntries(new FormData(e.target).entries());
-      if (!v.name.trim()) return UI.toast('Business name is required', 'warning');
-      saveSettings({ business: { name: v.name.trim(), address: v.address.trim(), phone: v.phone.trim(), taxNo: v.taxNo.trim(), licenseNo: (v.licenseNo || '').trim(), footer: v.footer.trim() }, currency: v.currency.trim() || 'Rs' });
-      UI.toast('Business profile saved');
-    });
-    $el.on('submit', '.f-sales', (e) => {
-      e.preventDefault();
-      const f = e.target; const v = Object.fromEntries(new FormData(f).entries());
-      const rate = num(v.taxRate);
-      if (rate < 0 || rate > 100) return UI.toast('Tax rate must be between 0 and 100', 'warning');
-      const prefixes = {};
-      for (const k of Object.keys(P)) {
-        const p = String(v['p_' + k] || '').trim().toUpperCase();
-        if (!/^[A-Z0-9]{1,12}$/.test(p)) return UI.toast(`Invalid prefix for ${k}. Use letters and digits only.`, 'warning');
-        prefixes[k] = p;
-      }
-      saveSettings({ taxEnabled: f.taxEnabled.checked, taxRate: rate, allowNegativeStock: f.allowNegativeStock.checked, updatePurchasePrice: f.updatePurchasePrice.checked, prefixes });
-      UI.toast('Settings saved');
-    });
-    $el.on('submit', '.f-expiry', (e) => {
-      e.preventDefault();
-      const f = e.target;
-      const nd = parseInt(f.nearExpiryDays.value, 10); const cd = parseInt(f.creditDays.value, 10);
-      if (!(nd >= 0 && nd <= 730) || !(cd >= 0 && cd <= 730)) return UI.toast('Enter days between 0 and 730', 'warning');
-      saveSettings({ nearExpiryDays: nd, creditDays: cd, allowExpiredSale: f.allowExpiredSale.checked });
-      UI.toast('Expiry & credit settings saved');
-    });
-    $el.on('submit', '.f-wa', (e) => {
-      e.preventDefault();
-      const f = e.target;
-      const cc = f.countryCode.value.replace(/\D/g, '');
-      if (!cc) return UI.toast('Enter the country code (92 for Pakistan)', 'warning');
-      if (f.ownerPhone.value.trim() && !normalizePhone(f.ownerPhone.value)) return UI.toast('The owner number is not valid', 'warning');
-      saveSettings({ whatsapp: { countryCode: cc, mode: f.mode.value, ownerPhone: f.ownerPhone.value.trim(), offerAfterSale: f.offerAfterSale.checked,
-        statementRows: Math.max(5, Math.min(100, parseInt(f.statementRows.value, 10) || 30)) } });
-      UI.toast('WhatsApp settings saved');
-    });
-    $el.on('click', '.btn-wa-test', () => compose({ title: 'Test message', phone: getSettings().whatsapp.ownerPhone, text: `Test message from ${getSettings().business.name}.` }));
-    const tplShow = () => {
-      const k = $el.find('.tpl-key').val();
-      $el.find('.tpl-text').val(getSettings().whatsapp.templates?.[k] || TEMPLATES[k].text);
-      $el.find('.tpl-vars').html(TEMPLATES[k].vars.map((x) => `<code>{${x}}</code>`).join(' '));
+    const renderCrops = async () => {
+      const crops = Catalog.allCrops();
+      return `
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="small text-muted">${crops.length} crops configured</span>
+          <button class="btn btn-sm btn-success btn-add-crop"><i class="bi bi-plus-lg me-1"></i>Add Crop</button>
+        </div>
+        <div class="list-group list-group-flush" id="crops-list">
+          ${crops.map((c) => `
+            <div class="list-group-item d-flex justify-content-between align-items-center crop-item" data-id="${c.id}">
+              <div>
+                <span class="fw-semibold">${esc(c.name)}</span>
+                ${c.urdu ? `<span class="text-muted ms-2 small" dir="rtl">${esc(c.urdu)}</span>` : ''}
+                <span class="badge bg-secondary-subtle text-secondary ms-2 small">${c.season || 'both'}</span>
+              </div>
+              <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-secondary btn-edit-crop" title="Edit"><i class="bi bi-pencil"></i></button>
+                <button class="btn btn-outline-danger btn-del-crop" title="Delete"><i class="bi bi-trash"></i></button>
+              </div>
+            </div>`).join('')}
+        </div>`;
     };
-    tplShow();
-    $el.on('change', '.tpl-key', tplShow);
-    const saveTpl = (k, text) => {
-      const templates = { ...(getSettings().whatsapp.templates || {}) };
-      if (text === null) delete templates[k]; else templates[k] = text;
-      // saveSettings merges objects, so the whole templates map is replaced explicitly.
-      const s2 = getSettings(); s2.whatsapp.templates = {};
-      saveSettings({ whatsapp: { templates } });
-    };
-    $el.on('click', '.btn-tpl-save', () => { const t = $el.find('.tpl-text').val(); if (!t.trim()) return UI.toast('Template is empty', 'warning'); saveTpl($el.find('.tpl-key').val(), t); UI.toast('Template saved'); });
-    $el.on('click', '.btn-tpl-reset', () => { saveTpl($el.find('.tpl-key').val(), null); tplShow(); UI.toast('Default template restored'); });
-    const btStatus = () => $el.find('.bt-status').text(Printer.isConnected() ? `Connected: ${Printer.connectedName()}` : getSettings().printer.deviceName ? `Not connected (last: ${getSettings().printer.deviceName})` : 'No printer connected');
-    btStatus();
-    const onPrinter = () => btStatus();
-    document.addEventListener('printer:changed', onPrinter);
-    this._off = () => document.removeEventListener('printer:changed', onPrinter);
-    $el.on('change', '.f-printer', (e) => {
-      const f = e.currentTarget;
-      const copies = Math.max(1, Math.min(5, parseInt(f.copies.value, 10) || 1));
-      saveSettings({ printer: { method: f.method.value, width: Number(f.width.value), autoPrint: f.autoPrint.checked, copies } });
-      $el.find('.bt-box').toggleClass('d-none', f.method.value !== 'bluetooth');
-      $el.find('.rawbt-box').toggleClass('d-none', f.method.value !== 'rawbt');
+
+    const cropsHtml = await renderCrops();
+
+    $el.html(`
+      <h5 class="mb-3">Settings</h5>
+      <div class="row g-3">
+        <div class="col-lg-6">
+          ${section('Farm Information', 'geo-alt', `
+            <form class="f-farm row g-2">
+              <div class="col-12"><label class="form-label">Farm / Operation Name</label>
+                <input name="farmName" class="form-control" value="${esc(s.farm.name)}" placeholder="My Farm" ${ro}></div>
+              <div class="col-12"><label class="form-label">Owner Name</label>
+                <input name="ownerName" class="form-control" value="${esc(s.farm.ownerName || '')}" placeholder="Malik Sahib" ${ro}></div>
+              <div class="col-12"><label class="form-label">Address</label>
+                <input name="address" class="form-control" value="${esc(s.farm.address || '')}" placeholder="Village / Mauza" ${ro}></div>
+              <div class="col-6"><label class="form-label">District</label>
+                <input name="district" class="form-control" value="${esc(s.farm.district || '')}" placeholder="Faisalabad" ${ro}></div>
+              <div class="col-6"><label class="form-label">Tehsil</label>
+                <input name="tehsil" class="form-control" value="${esc(s.farm.tehsil || '')}" ${ro}></div>
+              <div class="col-6"><label class="form-label">Phone</label>
+                <input name="phone" type="tel" class="form-control" value="${esc(s.farm.phone || '')}" placeholder="03xx…" ${ro}></div>
+              ${manage ? '<div class="col-12"><button class="btn btn-primary">Save</button></div>' : ''}
+            </form>`)}
+
+          ${section('Units & Measurements', 'rulers', `
+            <form class="f-units row g-2">
+              <div class="col-6"><label class="form-label">Default Weight Unit</label>
+                <select name="defaultWeightUnit" class="form-select">
+                  ${unitOptions(WEIGHT_UNITS, s.defaultWeightUnit)}
+                </select></div>
+              <div class="col-6"><label class="form-label">Default Area Unit</label>
+                <select name="defaultAreaUnit" class="form-select">
+                  ${unitOptions(AREA_UNITS, s.defaultAreaUnit)}
+                </select></div>
+              <div class="col-6"><label class="form-label">Currency Symbol</label>
+                <input name="currency" class="form-control" maxlength="5" value="${esc(s.currency)}"></div>
+              ${manage ? '<div class="col-12"><button class="btn btn-primary">Save</button></div>' : ''}
+            </form>`)}
+
+          ${section('Appearance', 'palette', `
+            <label class="form-label">Theme</label>
+            <select class="form-select f-theme">
+              <option value="auto"  ${s.theme === 'auto'  ? 'selected' : ''}>Follow device</option>
+              <option value="light" ${s.theme === 'light' ? 'selected' : ''}>Light</option>
+              <option value="dark"  ${s.theme === 'dark'  ? 'selected' : ''}>Dark</option>
+            </select>`)}
+        </div>
+
+        <div class="col-lg-6">
+          ${section('Crop List', 'flower1', cropsHtml)}
+
+          ${section('WhatsApp Contact', 'whatsapp', `
+            <form class="f-whatsapp row g-2">
+              <div class="col-4"><label class="form-label">Country Code</label>
+                <div class="input-group"><span class="input-group-text">+</span>
+                <input name="countryCode" class="form-control" maxlength="4" value="${esc(s.whatsapp?.countryCode || '92')}"></div></div>
+              <div class="col-8"><label class="form-label">Your WhatsApp Number</label>
+                <input name="ownerPhone" type="tel" class="form-control" placeholder="03xx…" value="${esc(s.whatsapp?.ownerPhone || '')}"></div>
+              ${manage ? '<div class="col-12"><button class="btn btn-primary">Save</button></div>' : ''}
+            </form>`)}
+
+          ${section('Account', 'person-badge', `
+            <div class="mb-2">
+              <div class="fw-semibold">${esc(u?.name || u?.username || '—')}</div>
+              <div class="text-muted small">${esc(u?.role || '')} · ${esc(u?.username || '')}</div>
+            </div>
+            <div class="text-muted small mb-1">App version: ${CONFIG.APP_VERSION}</div>
+            <div class="text-muted small">Data is stored locally on this device only. KisanBook works offline.</div>`)}
+        </div>
+      </div>`);
+
+    // ── Form handlers ────────────────────────────────────
+    $el.find('.f-farm').on('submit', (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(e.target));
+      const ns = getSettings();
+      ns.farm = { ...ns.farm, name: f.farmName, ownerName: f.ownerName, address: f.address, district: f.district, tehsil: f.tehsil, phone: f.phone };
+      saveSettings(ns);
+      document.dispatchEvent(new CustomEvent('settings:changed'));
+      UI.toast('Farm info saved.');
     });
-    $el.on('change', '.f-chunk', function () { saveSettings({ printer: { chunkSize: Number(this.value) } }); UI.toast('Printer speed saved'); });
-    $el.on('click', '.btn-bt-connect', async () => { try { const n = await Printer.connectBluetooth(); UI.toast(`Connected to ${n || 'printer'}`); } catch (e) { UI.toastError(e); } btStatus(); });
-    $el.on('click', '.btn-bt-disconnect', () => { Printer.disconnect(); btStatus(); });
-    $el.on('click', '.btn-test', async () => { try { await Printer.testPrint(); } catch (e) { UI.toastError(e); } });
-    const { canInstall, promptInstall } = await import('../app.js');
-    if (canInstall()) $el.find('.btn-install').removeClass('d-none').on('click', promptInstall);
-    if (Printer.capabilities().ios && !window.matchMedia('(display-mode: standalone)').matches) $el.find('.ios-hint').removeClass('d-none');
-    if (navigator.storage?.estimate) {
-      const [est, persisted] = await Promise.all([navigator.storage.estimate(), navigator.storage.persisted?.() ?? false]);
-      $el.find('.storage-info').text(`${(est.usage / 1048576).toFixed(1)} MB used · storage ${persisted ? 'persistent' : 'best-effort (may be cleared by the browser under pressure)'}`);
-    } else $el.find('.storage-info').text('');
-    $el.on('click', '.btn-integrity', async () => {
-      const r = await UI.withLoading(() => Posting.integrityCheck(), 'Checking…');
-      await UI.confirmDialog(`<p>Checked ${r.checked.entries} ledger entries, ${r.checked.stockMoves} stock movements and ${r.checked.products} products.</p>${r.issues.length ? `<div class="alert alert-warning small">${r.issues.slice(0, 50).map(esc).join('<br>')}</div>` : '<div class="alert alert-success mb-0">No problems found.</div>'}`, { html: true, title: 'Data integrity', okLabel: 'OK' });
+
+    $el.find('.f-units').on('submit', (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(e.target));
+      const ns = getSettings();
+      ns.defaultWeightUnit = f.defaultWeightUnit;
+      ns.defaultAreaUnit   = f.defaultAreaUnit;
+      ns.currency          = f.currency || 'Rs';
+      saveSettings(ns);
+      UI.toast('Units saved.');
     });
-    $el.on('click', '.btn-rebuild', async () => {
-      try {
-        const fixed = await UI.withLoading(() => Posting.rebuildStock(), 'Recalculating…');
-        UI.toast(fixed.length ? `Corrected stock for ${fixed.length} product(s)` : 'All stock quantities already match the stock ledger', fixed.length ? 'warning' : 'success');
-      } catch (e) { UI.toastError(e); }
+
+    $el.find('.f-whatsapp').on('submit', (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(e.target));
+      const ns = getSettings();
+      ns.whatsapp = { countryCode: f.countryCode || '92', ownerPhone: f.ownerPhone };
+      saveSettings(ns);
+      UI.toast('WhatsApp settings saved.');
     });
+
+    $el.find('.f-theme').on('change', function () {
+      const val = $(this).val();
+      const ns = getSettings();
+      ns.theme = val;
+      saveSettings(ns);
+      document.documentElement.setAttribute('data-bs-theme', val === 'auto'
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : val);
+      UI.toast('Theme updated.');
+    });
+
+    // ── Crop CRUD ────────────────────────────────────────
+    $el.on('click', '.btn-add-crop', async () => {
+      await openCropModal();
+      this.render(el);
+    });
+    $el.on('click', '.btn-edit-crop', async function () {
+      const id = $(this).closest('.crop-item').data('id');
+      const c  = Catalog.crop(id);
+      await openCropModal(c);
+      this.render(el);
+    }.bind(this));
+    $el.on('click', '.btn-del-crop', async function () {
+      const id = $(this).closest('.crop-item').data('id');
+      const c  = Catalog.crop(id);
+      if (!c || !await UI.confirmDialog(`Delete crop "${c.name}"?\nSeasons linked to this crop will lose the crop reference.`, { okLabel: 'Delete', okClass: 'btn-danger' })) return;
+      await idb.delete('crops', id);
+      await Catalog.refreshCrop(id);
+      this.render(el);
+    }.bind(this));
   },
-  destroy() { this._off?.(); this._off = null; },
+
+  destroy() { $el?.off(); $el = null; },
 };

@@ -10,15 +10,15 @@ const $ = window.jQuery;
 export async function downloadBackup() {
   const b = await UI.withLoading(() => Backup.createBackup(), 'Preparing backup…');
   const stamp = b.createdAt.replace(/[:.]/g, '-').slice(0, 19);
-  downloadFile(`saleapp-backup-${stamp}.json`, JSON.stringify(b), 'application/json');
+  downloadFile(`kisanbook-backup-${stamp}.json`, JSON.stringify(b), 'application/json');
   pref.set('lastBackupAt', b.createdAt);
   return b;
 }
 
 const LABELS = {
-  products: 'Products', categories: 'Categories', customers: 'Customers', suppliers: 'Suppliers', accounts: 'Accounts', sales: 'Sales', saleItems: 'Sale items',
-  purchases: 'Purchases', purchaseItems: 'Purchase items', saleReturns: 'Sale returns', purchaseReturns: 'Purchase returns', vouchers: 'Payments / vouchers',
-  entries: 'Ledger entries', stockMoves: 'Stock movements', adjustments: 'Stock adjustments', holds: 'Held sales', auditLog: 'Activity log', meta: 'Counters / metadata',
+  farms: 'Farms', plots: 'Plots', crops: 'Crops', seasons: 'Seasons',
+  expenses: 'Expenses', laborEntries: 'Labor entries', harvests: 'Harvests',
+  sales: 'Sales', buyers: 'Buyers', auditLog: 'Activity log', meta: 'Metadata',
 };
 
 export default {
@@ -30,7 +30,7 @@ export default {
       <div class="row g-3">
         <div class="col-lg-6"><div class="card h-100"><div class="card-body">
           <h2 class="h6"><i class="bi bi-cloud-arrow-down me-2"></i>Export backup</h2>
-          <p class="small text-body-secondary">Downloads a complete JSON backup of all POS data on this device: products, customers, suppliers, accounts, sales, purchases, returns, payments, stock movements, ledger and settings. Passwords and login credentials are <b>never</b> included.</p>
+          <p class="small text-body-secondary">Downloads a complete JSON backup of all farm data on this device: farms, plots, crops, seasons, expenses, labor, harvests, sales, buyers and settings. Passwords and login credentials are <b>never</b> included.</p>
           <div class="small mb-3">Last backup on this device: <b>${last ? fmtDateTime(last) : 'never'}</b></div>
           <button class="btn btn-primary btn-export"><i class="bi bi-download me-1"></i>Download backup</button>
         </div></div></div>
@@ -67,14 +67,14 @@ export default {
             <button class="btn btn-outline-primary btn-merge"><i class="bi bi-intersect me-1"></i>Merge into local data</button>
             <button class="btn btn-danger btn-replace"><i class="bi bi-arrow-repeat me-1"></i>Replace all local data</button>
           </div>
-          <div class="form-text">Merge adds records that are missing and updates records that are newer in the backup. Replace erases all POS data on this device and loads the backup.</div>` : ''}`);
+          <div class="form-text">Merge adds records that are missing and updates records that are newer in the backup. Replace erases all farm data on this device and loads the backup.</div>` : ''}`);
         if (ok) obj = parsed;
       } catch (e) { $p.html(UI.errorState(e)); }
     });
     const doRestore = async (mode) => {
       if (!obj) return;
       const msg = mode === 'replace'
-        ? '<p>This will <b>erase all POS data on this device</b> and replace it with the backup. This cannot be undone.</p><label class="form-label small">Type <b>REPLACE</b> to confirm</label><input class="form-control confirm-text">'
+        ? '<p>This will <b>erase all farm data on this device</b> and replace it with the backup. This cannot be undone.</p><label class="form-label small">Type <b>REPLACE</b> to confirm</label><input class="form-control confirm-text">'
         : '<p>Records from the backup will be merged into the local data. Existing newer records are kept.</p>';
       let typed = '';
       const m = UI.confirmDialog(msg, { html: true, okLabel: mode === 'replace' ? 'Replace data' : 'Merge', okClass: mode === 'replace' ? 'btn-danger' : 'btn-primary', title: mode === 'replace' ? 'Replace all data?' : 'Merge backup?' });

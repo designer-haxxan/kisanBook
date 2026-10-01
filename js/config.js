@@ -1,14 +1,13 @@
 // Deployment configuration.
 export const CONFIG = {
-  APP_NAME: 'AgriSale POS',
-  APP_VERSION: '2.0.0',
-  SCHEMA_VERSION: 2,
-  BACKUP_VERSION: 2,
-  // Login API: POST {AUTH_API_BASE}/login. The server does not send CORS headers, so the app must be
-  // served from the same origin (https://eposwala.com) or the API must allow the app's origin.
+  APP_NAME: 'KisanBook',
+  APP_NAME_UR: 'کسان بک',
+  APP_TAGLINE: 'Pakistan Farm Manager',
+  APP_VERSION: '3.0.0',
+  SCHEMA_VERSION: 3,
+  BACKUP_VERSION: 3,
   AUTH_API_BASE: 'https://eposwala.com/api',
   SUPPORT_PHONE: '0302-8863131',
-  // Country calling code used to turn local numbers (03xx…) into WhatsApp numbers (923xx…).
   DEFAULT_COUNTRY_CODE: '92',
 };
 
