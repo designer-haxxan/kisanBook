@@ -69,6 +69,27 @@ export function formModal({ title, body, submitLabel = 'Save', submitClass = 'bt
   });
 }
 
+// Simple form dialog — resolves with the modal's $el when OK is clicked
+// (modal still in DOM so callers can read field values), or null on cancel.
+export function formDialog(title, body, { okLabel = 'Save', okClass = 'btn-primary', size = '' } = {}) {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const m = modal({
+      title, size,
+      body,
+      footer: `<button class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+               <button class="btn ${okClass} btn-ok">${esc(okLabel)}</button>`,
+    });
+    m.$el.on('shown.bs.modal', () => m.$el.find('input,select,textarea').filter(':visible').first().trigger('focus'));
+    m.$el.find('.btn-ok').on('click', () => {
+      resolved = true;
+      resolve(m.$el);
+      m.close();
+    });
+    m.closed.then(() => { if (!resolved) resolve(null); });
+  });
+}
+
 export function confirmDialog(message, { title = 'Please confirm', okLabel = 'Confirm', okClass = 'btn-primary', html = false } = {}) {
   return new Promise((resolve) => {
     let ok = false;
