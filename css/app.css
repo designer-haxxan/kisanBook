@@ -600,6 +600,26 @@ button.list-row { width: 100%; background: none; border-left: 0; border-right: 0
 /* Progress bars */
 .progress-bar { background-color: var(--kb-green); }
 
+/* ── Magic-link auto-fill ────────────────────────────────── */
+.autofill-hint {
+  font-family: 'Noto Nastaliq Urdu', 'Jameel Noori Nastaleeq', 'Urdu Typesetting', serif;
+  font-size: .9rem; line-height: 2; text-align: right;
+  padding: 10px 14px; margin-bottom: 10px; border-radius: 10px;
+  background: rgba(45,122,74,.1);
+  border: 1px solid rgba(45,122,74,.3);
+  color: #1a3d2b;
+}
+[data-bs-theme="dark"] .autofill-hint {
+  background: rgba(77,171,110,.1);
+  border-color: rgba(77,171,110,.25);
+  color: #a8d8bc;
+}
+@keyframes kb-pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(45,122,74,.35); }
+  50%       { box-shadow: 0 4px 28px rgba(45,122,74,.8), 0 0 0 6px rgba(45,122,74,.2); }
+}
+#login-btn.autofill-pulse { animation: kb-pulse 1.4s ease-in-out 3; }
+
 /* ── Print (minimal) ─────────────────────────────────────── */
 #print-area { display: none; }
 @media print {
